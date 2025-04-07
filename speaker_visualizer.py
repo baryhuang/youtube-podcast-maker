@@ -30,6 +30,7 @@ from moviepy import (
     concatenate_videoclips, clips_array, VideoClip, TextClip
 )
 from tqdm import tqdm
+from PIL import Image, ImageDraw, ImageFont  # Add PIL imports for better text rendering
 
 # Configure logging
 logging.basicConfig(
@@ -230,6 +231,30 @@ def create_audio_visualization(
         else:
             volume_data = [0.5 for _ in volume_data]
     
+    # Try to load a modern font - use a system font if available, otherwise fall back to default
+    try:
+        # Path to a nice modern font - adjust this path as needed for your system
+        font_path = "/System/Library/Fonts/Helvetica.ttc"  # macOS path
+        if not os.path.exists(font_path):
+            # Try Windows path
+            font_path = "C:/Windows/Fonts/segoeui.ttf"
+        if not os.path.exists(font_path):
+            # Try common Linux path
+            font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        
+        # Load the font with PIL
+        title_font = ImageFont.truetype(font_path, 32)  # For speaker names
+        subtitle_font = ImageFont.truetype(font_path, 26)  # For subtitles
+        time_font = ImageFont.truetype(font_path, 18)  # For time display
+        
+        logger.info(f"Using font: {font_path}")
+    except Exception as e:
+        # Fallback to default font if custom font not available
+        logger.warning(f"Could not load custom font, using default: {e}")
+        title_font = ImageFont.load_default()
+        subtitle_font = ImageFont.load_default()
+        time_font = ImageFont.load_default()
+    
     # Create a function to generate each frame of the output video
     def make_frame(t):
         # Create a base frame
@@ -409,39 +434,62 @@ def create_audio_visualization(
                 3  # Border thickness
             )
         
-        # Add speaker labels
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(frame, "Ben", (half_width // 2 - 60, 50), font, 1, (255, 255, 255), 2)
-        cv2.putText(frame, "Taylor", (half_width + half_width // 2 - 60, 50), font, 1, (255, 255, 255), 2)
+        # Convert OpenCV BGR frame to PIL Image for better text rendering
+        pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(pil_img)
         
-        # Add current text at the bottom of the frame
+        # Add speaker labels with anti-aliased text
+        draw.text((half_width // 2 - 60, 50), "Ben", fill=(255, 255, 255), font=title_font)
+        draw.text((half_width + half_width // 2 - 60, 50), "Taylor", fill=(255, 255, 255), font=title_font)
+        
+        # Add current text at the bottom of the frame with modern styling
         if current_text:
             # Limit text length for display
-            if len(current_text) > 50:
-                current_text = current_text[:47] + "..."
+            if len(current_text) > 60:
+                current_text = current_text[:57] + "..."
             
-            # Add a dark background for the text
-            text_size = cv2.getTextSize(current_text, font, 0.8, 2)[0]
-            text_x = (width - text_size[0]) // 2
-            text_y = height - 50
+            # Calculate text size for centering
+            text_bbox = draw.textbbox((0, 0), current_text, font=subtitle_font)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
             
-            # Draw background rectangle
-            cv2.rectangle(
-                frame,
-                (text_x - 10, text_y - 30),
-                (text_x + text_size[0] + 10, text_y + 10),
-                (0, 0, 0),
-                -1
+            text_x = (width - text_width) // 2
+            text_y = height - 80
+            
+            # Draw semi-transparent background for subtitle
+            # Create a rounded rectangle shape for the background
+            background_color = (0, 0, 0, 180)  # Semi-transparent black
+            background_padding = 15
+            
+            # Draw rounded rectangle with alpha
+            overlay = Image.new('RGBA', pil_img.size, (0, 0, 0, 0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            
+            # Draw rounded rectangle for subtitle background
+            overlay_draw.rounded_rectangle(
+                (
+                    text_x - background_padding,
+                    text_y - background_padding,
+                    text_x + text_width + background_padding,
+                    text_y + text_height + background_padding
+                ),
+                radius=10,  # Rounded corners
+                fill=background_color
             )
             
-            # Draw text
-            cv2.putText(frame, current_text, (text_x, text_y), font, 0.8, (255, 255, 255), 2)
+            # Composite the overlay onto the main image
+            pil_img = Image.alpha_composite(pil_img.convert('RGBA'), overlay)
+            draw = ImageDraw.Draw(pil_img)
+            
+            # Draw text with anti-aliasing
+            draw.text((text_x, text_y), current_text, fill=(255, 255, 255), font=subtitle_font)
         
         # Add time counter
         time_str = f"Time: {int(t // 60):02d}:{int(t % 60):02d}"
-        cv2.putText(frame, time_str, (width - 150, height - 20), font, 0.5, (255, 255, 255), 1)
+        draw.text((width - 150, height - 30), time_str, fill=(255, 255, 255), font=time_font)
         
-        return frame
+        # Convert back to OpenCV format for output
+        return cv2.cvtColor(np.array(pil_img.convert('RGB')), cv2.COLOR_RGB2BGR)
     
     # Create the video clip
     logger.info("Creating video clip")
