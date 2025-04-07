@@ -172,8 +172,8 @@ def create_audio_visualization(
     logger.info("Creating speaker visualization video with waveform effects")
     
     # Fixed parameters
-    width = 1280
-    height = 720
+    width = 1920
+    height = 1080
     fps = 24
     speaker1_color = '#3498db'  # Blue
     speaker2_color = '#e74c3c'  # Red
@@ -411,8 +411,8 @@ def create_audio_visualization(
         
         # Add speaker labels
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(frame, "Speaker A", (half_width // 2 - 60, 50), font, 1, (255, 255, 255), 2)
-        cv2.putText(frame, "Speaker B", (half_width + half_width // 2 - 60, 50), font, 1, (255, 255, 255), 2)
+        cv2.putText(frame, "Ben", (half_width // 2 - 60, 50), font, 1, (255, 255, 255), 2)
+        cv2.putText(frame, "Taylor", (half_width + half_width // 2 - 60, 50), font, 1, (255, 255, 255), 2)
         
         # Add current text at the bottom of the frame
         if current_text:
