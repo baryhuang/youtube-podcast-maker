@@ -260,71 +260,154 @@ def create_audio_visualization(
         frame_idx = min(int(t * fps), len(volume_data) - 1) if volume_data else 0
         volume = volume_data[frame_idx] if frame_idx >= 0 and frame_idx < len(volume_data) else 0
         
-        # Visualize the volume for the active speaker
-        if active_speaker is not None:
-            # Calculate visualization parameters based on volume
-            waveform_height = int(height * 0.4 * volume)  # Max height is 40% of frame
-            waveform_height = max(5, waveform_height)  # Minimum height of 5 pixels
+        # Calculate base circle parameters
+        max_radius = min(half_width // 3, height // 4)  # Smaller maximum size
+        base_radius = max(int(max_radius * 0.6), 40)  # Larger minimum base radius (60% of max)
+        
+        # Set radius for each speaker
+        # Speaker A only changes size when they are the active speaker
+        if active_speaker == "A":
+            volume_radius_a = base_radius + int(max_radius * volume * 0.4)
+        else:
+            volume_radius_a = base_radius  # Constant size when not speaking
             
-            center_y = height // 2
+        # Speaker B only changes size when they are the active speaker
+        if active_speaker == "B":
+            volume_radius_b = base_radius + int(max_radius * volume * 0.4)
+        else:
+            volume_radius_b = base_radius  # Constant size when not speaking
+        
+        # Define circle centers for both speakers
+        center_y = height // 2
+        center_x_a = half_width // 2
+        center_x_b = half_width + half_width // 2
+        
+        # Draw circles for Speaker A (always present)
+        # Create gradient pattern inside the circle for Speaker A
+        for r in range(volume_radius_a, 0, -5):
+            # Create color gradient effect
+            ratio = r / volume_radius_a
             
-            if active_speaker == "A":
-                # Highlight the left side (Speaker A)
-                # Convert RGB to BGR for OpenCV
-                active_color_bgr = speaker1_rgb[::-1]
-                
-                # Create brighter version for active speaker
-                frame[:, :half_width] = active_color_bgr
-                
-                # Draw waveform visualization
-                for x in range(10, half_width - 10, 10):
-                    # Vary the height slightly to create a wave effect
-                    wave_y = int(waveform_height * np.sin(x * 0.05 + t * 10) * 0.2 + waveform_height)
-                    cv2.rectangle(
-                        frame,
-                        (x, center_y - wave_y),
-                        (x + 5, center_y + wave_y),
-                        (255, 255, 255),  # White bars
-                        -1  # Filled rectangle
-                    )
-                
-                # Add a highlight border
-                cv2.rectangle(
-                    frame,
-                    (0, 0),
-                    (half_width, height),
-                    (255, 255, 255),  # White highlight
-                    3  # Border thickness
-                )
-                
-            elif active_speaker == "B":
-                # Highlight the right side (Speaker B)
-                # Convert RGB to BGR for OpenCV
-                active_color_bgr = speaker2_rgb[::-1]
-                
-                # Create brighter version for active speaker
-                frame[:, half_width:] = active_color_bgr
-                
-                # Draw waveform visualization
-                for x in range(half_width + 10, width - 10, 10):
-                    # Vary the height slightly to create a wave effect
-                    wave_y = int(waveform_height * np.sin(x * 0.05 + t * 10) * 0.2 + waveform_height)
-                    cv2.rectangle(
-                        frame,
-                        (x, center_y - wave_y),
-                        (x + 5, center_y + wave_y),
-                        (255, 255, 255),  # White bars
-                        -1  # Filled rectangle
-                    )
-                
-                # Add a highlight border
-                cv2.rectangle(
-                    frame,
-                    (half_width, 0),
-                    (width, height),
-                    (255, 255, 255),  # White highlight
-                    3  # Border thickness
-                )
+            # Base color with slight variations for inner circles
+            r_val = int(speaker1_rgb[0] * (0.5 + 0.5 * ratio))
+            g_val = int(speaker1_rgb[1] * (0.5 + 0.5 * ratio))
+            b_val = int(speaker1_rgb[2] * (0.5 + 0.5 * ratio))
+            
+            # Add wave pattern effect inside
+            if r % 10 < 5:
+                # Alternate pattern for visual interest
+                r_val = min(255, int(r_val * 1.2))
+                g_val = min(255, int(g_val * 1.2))
+                b_val = min(255, int(b_val * 1.2))
+            
+            # Darken the inactive speaker's circle
+            if active_speaker != "A":
+                r_val = int(r_val * 0.7)
+                g_val = int(g_val * 0.7)
+                b_val = int(b_val * 0.7)
+            
+            # BGR for OpenCV
+            circle_color = (b_val, g_val, r_val)
+            
+            # Draw concentric circles with decreasing radius
+            cv2.circle(
+                frame,
+                (center_x_a, center_y),
+                r,
+                circle_color,
+                2 if r == volume_radius_a else -1  # Outline for outer circle, filled for inner
+            )
+        
+        # Draw circles for Speaker B (always present)
+        # Create gradient pattern inside the circle for Speaker B
+        for r in range(volume_radius_b, 0, -5):
+            # Create color gradient effect
+            ratio = r / volume_radius_b
+            
+            # Base color with slight variations for inner circles
+            r_val = int(speaker2_rgb[0] * (0.5 + 0.5 * ratio))
+            g_val = int(speaker2_rgb[1] * (0.5 + 0.5 * ratio))
+            b_val = int(speaker2_rgb[2] * (0.5 + 0.5 * ratio))
+            
+            # Add wave pattern effect inside
+            if r % 10 < 5:
+                # Alternate pattern for visual interest
+                r_val = min(255, int(r_val * 1.2))
+                g_val = min(255, int(g_val * 1.2))
+                b_val = min(255, int(b_val * 1.2))
+            
+            # Darken the inactive speaker's circle
+            if active_speaker != "B":
+                r_val = int(r_val * 0.7)
+                g_val = int(g_val * 0.7)
+                b_val = int(b_val * 0.7)
+            
+            # BGR for OpenCV
+            circle_color = (b_val, g_val, r_val)
+            
+            # Draw concentric circles with decreasing radius
+            cv2.circle(
+                frame,
+                (center_x_b, center_y),
+                r,
+                circle_color,
+                2 if r == volume_radius_b else -1  # Outline for outer circle, filled for inner
+            )
+        
+        # Add a pulse effect outer ring only for active speaker
+        if active_speaker == "A":
+            # Highlight the left side (Speaker A)
+            # Convert RGB to BGR for OpenCV
+            active_color_bgr = speaker1_rgb[::-1]
+            
+            # Create brighter version for active speaker
+            frame[:, :half_width] = active_color_bgr
+            
+            # Add a pulse effect outer ring
+            pulse_size = int(volume_radius_a * (1.0 + 0.1 * np.sin(t * 8)))
+            cv2.circle(
+                frame,
+                (center_x_a, center_y),
+                pulse_size,
+                (255, 255, 255),
+                2
+            )
+            
+            # Add a highlight border for the side
+            cv2.rectangle(
+                frame,
+                (0, 0),
+                (half_width, height),
+                (255, 255, 255),  # White highlight
+                3  # Border thickness
+            )
+            
+        elif active_speaker == "B":
+            # Highlight the right side (Speaker B)
+            # Convert RGB to BGR for OpenCV
+            active_color_bgr = speaker2_rgb[::-1]
+            
+            # Create brighter version for active speaker
+            frame[:, half_width:] = active_color_bgr
+            
+            # Add a pulse effect outer ring
+            pulse_size = int(volume_radius_b * (1.0 + 0.1 * np.sin(t * 8)))
+            cv2.circle(
+                frame,
+                (center_x_b, center_y),
+                pulse_size,
+                (255, 255, 255),
+                2
+            )
+            
+            # Add a highlight border for the side
+            cv2.rectangle(
+                frame,
+                (half_width, 0),
+                (width, height),
+                (255, 255, 255),  # White highlight
+                3  # Border thickness
+            )
         
         # Add speaker labels
         font = cv2.FONT_HERSHEY_SIMPLEX
