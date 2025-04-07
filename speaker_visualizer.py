@@ -243,8 +243,8 @@ def create_audio_visualization(
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
         
         # Load the font with PIL
-        title_font = ImageFont.truetype(font_path, 32)  # For speaker names
-        subtitle_font = ImageFont.truetype(font_path, 26)  # For subtitles
+        title_font = ImageFont.truetype(font_path, 48)  # Increased from 32 to 48 for speaker names
+        subtitle_font = ImageFont.truetype(font_path, 36)  # Increased from 26 to 36 for subtitles
         time_font = ImageFont.truetype(font_path, 18)  # For time display
         
         logger.info(f"Using font: {font_path}")
@@ -438,9 +438,10 @@ def create_audio_visualization(
         pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(pil_img)
         
-        # Add speaker labels with anti-aliased text
-        draw.text((half_width // 2 - 60, 50), "Ben", fill=(255, 255, 255), font=title_font)
-        draw.text((half_width + half_width // 2 - 60, 50), "Taylor", fill=(255, 255, 255), font=title_font)
+        # Add speaker labels with anti-aliased text - moved down closer to middle
+        name_y_position = center_y - 300  # Increased distance from center (was -180)
+        draw.text((half_width // 2 - 80, name_y_position), "Ben", fill=(255, 255, 255), font=title_font)
+        draw.text((half_width + half_width // 2 - 80, name_y_position), "Taylor", fill=(255, 255, 255), font=title_font)
         
         # Add current text at the bottom of the frame with modern styling
         if current_text:
@@ -454,12 +455,12 @@ def create_audio_visualization(
             text_height = text_bbox[3] - text_bbox[1]
             
             text_x = (width - text_width) // 2
-            text_y = height - 80
+            text_y = center_y + 300  # Increased distance from center (was +180)
             
             # Draw semi-transparent background for subtitle
             # Create a rounded rectangle shape for the background
             background_color = (0, 0, 0, 180)  # Semi-transparent black
-            background_padding = 15
+            background_padding = 20  # Increased padding for larger text
             
             # Draw rounded rectangle with alpha
             overlay = Image.new('RGBA', pil_img.size, (0, 0, 0, 0))
