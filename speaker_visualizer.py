@@ -56,6 +56,8 @@ def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description='Create a split-screen video visualization for speaker diarization')
     parser.add_argument('audio_file', help='Path to the input audio file')
+    parser.add_argument('--swap-speaker', action='store_true', help='Swap speaker A to be Taylor instead of Ben')
+    parser.add_argument('--preview', action='store_true', help='Only render the first 10 seconds for preview')
     
     return parser.parse_args()
 
@@ -156,10 +158,56 @@ def transcribe_audio(audio_path: str, api_key: str) -> List[SpeakerSegment]:
     logger.info(f"Transcription complete: {len(segments)} segments")
     return segments
 
+def get_speaker_mapping(swap_speaker: bool) -> Dict[str, Dict[str, Any]]:
+    """
+    Get the mapping between transcript speakers and visual representation.
+    
+    Args:
+        swap_speaker: Whether to swap the default speaker mapping
+    
+    Returns:
+        Dictionary mapping transcript speakers to visual properties
+    """
+    # Define speaker colors
+    ben_color = '#e74c3c'  # Orange/Red
+    taylor_color = '#3498db'  # Blue
+    
+    # Define the mapping
+    if swap_speaker:
+        # Speaker A -> Taylor, Speaker B -> Ben
+        return {
+            "A": {
+                "name": "Taylor",
+                "color": taylor_color,
+                "position": "right"
+            },
+            "B": {
+                "name": "Ben",
+                "color": ben_color,
+                "position": "left"
+            }
+        }
+    else:
+        # Speaker A -> Ben, Speaker B -> Taylor
+        return {
+            "A": {
+                "name": "Ben",
+                "color": ben_color,
+                "position": "left"
+            },
+            "B": {
+                "name": "Taylor",
+                "color": taylor_color,
+                "position": "right"
+            }
+        }
+
 def create_audio_visualization(
     segments: List[SpeakerSegment],
     audio_path: str,
-    output_path: str
+    output_path: str,
+    swap_speaker: bool = False,
+    preview: bool = False
 ):
     """
     Create a split-screen visualization showing which speaker is active,
@@ -169,6 +217,8 @@ def create_audio_visualization(
         segments: List of SpeakerSegment objects
         audio_path: Path to the input audio file
         output_path: Path to save the output video
+        swap_speaker: Whether to swap the default speaker mapping
+        preview: If True, only render the first 10 seconds
     """
     logger.info("Creating speaker visualization video with waveform effects")
     
@@ -176,12 +226,21 @@ def create_audio_visualization(
     width = 1920
     height = 1080
     fps = 24
-    speaker1_color = '#3498db'  # Blue
-    speaker2_color = '#e74c3c'  # Red
+    
+    # Get speaker mapping
+    speaker_mapping = get_speaker_mapping(swap_speaker)
+    
+    # Define visual properties based on position (left and right)
+    left_speaker = next(s for s in speaker_mapping.values() if s["position"] == "left")
+    right_speaker = next(s for s in speaker_mapping.values() if s["position"] == "right")
+    
+    # Extract colors
+    left_color = left_speaker["color"]
+    right_color = right_speaker["color"]
     
     # Convert hex colors to RGB
-    speaker1_rgb = hex_to_rgb(speaker1_color)
-    speaker2_rgb = hex_to_rgb(speaker2_color)
+    left_rgb = hex_to_rgb(left_color)
+    right_rgb = hex_to_rgb(right_color)
     
     # Create half-width for each speaker's side
     half_width = width // 2
@@ -192,9 +251,19 @@ def create_audio_visualization(
     # Get the duration from the segments
     max_end_time = max(segment.end for segment in segments) if segments else audio_clip.duration
     
+    # Apply preview limit if requested
+    if preview:
+        preview_duration = 10.0  # 10 seconds
+        max_end_time = min(max_end_time, preview_duration)
+        logger.info(f"Preview mode: rendering only the first {preview_duration} seconds")
+    
     # Trim audio to match the max duration from segments
     audio_clip = audio_clip.subclipped(0, max_end_time)
     
+    # Filter segments to only include those within the preview range if in preview mode
+    if preview:
+        segments = [s for s in segments if s.start < max_end_time]
+        
     # Precompute volume data at regular intervals
     logger.info("Extracting volume data from audio")
     sample_rate = audio_clip.fps
@@ -261,12 +330,12 @@ def create_audio_visualization(
         frame = np.zeros((height, width, 3), dtype=np.uint8)
         
         # Fill the left and right halves with baseline colors (darker versions)
-        left_color = tuple(int(c * 0.5) for c in speaker1_rgb)   # Speaker A - darker
-        right_color = tuple(int(c * 0.5) for c in speaker2_rgb)  # Speaker B - darker
+        left_color_darker = tuple(int(c * 0.5) for c in left_rgb)
+        right_color_darker = tuple(int(c * 0.5) for c in right_rgb)
         
         # Convert RGB to BGR for OpenCV
-        left_color_bgr = left_color[::-1]
-        right_color_bgr = right_color[::-1]
+        left_color_bgr = left_color_darker[::-1]
+        right_color_bgr = right_color_darker[::-1]
         
         # Fill the frame halves with base colors
         frame[:, :half_width] = left_color_bgr
@@ -289,34 +358,32 @@ def create_audio_visualization(
         max_radius = min(half_width // 3, height // 4)  # Smaller maximum size
         base_radius = max(int(max_radius * 0.6), 40)  # Larger minimum base radius (60% of max)
         
+        # Map active speaker to left/right position
+        active_position = speaker_mapping.get(active_speaker, {}).get("position", None)
+        
         # Set radius for each speaker
-        # Speaker A only changes size when they are the active speaker
-        if active_speaker == "A":
-            volume_radius_a = base_radius + int(max_radius * volume * 0.4)
-        else:
-            volume_radius_a = base_radius  # Constant size when not speaking
-            
-        # Speaker B only changes size when they are the active speaker
-        if active_speaker == "B":
-            volume_radius_b = base_radius + int(max_radius * volume * 0.4)
-        else:
-            volume_radius_b = base_radius  # Constant size when not speaking
+        left_radius = base_radius
+        right_radius = base_radius
+        
+        if active_position == "left":
+            left_radius = base_radius + int(max_radius * volume * 0.4)
+        elif active_position == "right":
+            right_radius = base_radius + int(max_radius * volume * 0.4)
         
         # Define circle centers for both speakers
         center_y = height // 2
-        center_x_a = half_width // 2
-        center_x_b = half_width + half_width // 2
+        center_x_left = half_width // 2
+        center_x_right = half_width + half_width // 2
         
-        # Draw circles for Speaker A (always present)
-        # Create gradient pattern inside the circle for Speaker A
-        for r in range(volume_radius_a, 0, -5):
+        # Draw circles for left speaker
+        for r in range(left_radius, 0, -5):
             # Create color gradient effect
-            ratio = r / volume_radius_a
+            ratio = r / left_radius
             
             # Base color with slight variations for inner circles
-            r_val = int(speaker1_rgb[0] * (0.5 + 0.5 * ratio))
-            g_val = int(speaker1_rgb[1] * (0.5 + 0.5 * ratio))
-            b_val = int(speaker1_rgb[2] * (0.5 + 0.5 * ratio))
+            r_val = int(left_rgb[0] * (0.5 + 0.5 * ratio))
+            g_val = int(left_rgb[1] * (0.5 + 0.5 * ratio))
+            b_val = int(left_rgb[2] * (0.5 + 0.5 * ratio))
             
             # Add wave pattern effect inside
             if r % 10 < 5:
@@ -326,7 +393,7 @@ def create_audio_visualization(
                 b_val = min(255, int(b_val * 1.2))
             
             # Darken the inactive speaker's circle
-            if active_speaker != "A":
+            if active_position != "left":
                 r_val = int(r_val * 0.7)
                 g_val = int(g_val * 0.7)
                 b_val = int(b_val * 0.7)
@@ -337,22 +404,21 @@ def create_audio_visualization(
             # Draw concentric circles with decreasing radius
             cv2.circle(
                 frame,
-                (center_x_a, center_y),
+                (center_x_left, center_y),
                 r,
                 circle_color,
-                2 if r == volume_radius_a else -1  # Outline for outer circle, filled for inner
+                2 if r == left_radius else -1  # Outline for outer circle, filled for inner
             )
         
-        # Draw circles for Speaker B (always present)
-        # Create gradient pattern inside the circle for Speaker B
-        for r in range(volume_radius_b, 0, -5):
+        # Draw circles for right speaker
+        for r in range(right_radius, 0, -5):
             # Create color gradient effect
-            ratio = r / volume_radius_b
+            ratio = r / right_radius
             
             # Base color with slight variations for inner circles
-            r_val = int(speaker2_rgb[0] * (0.5 + 0.5 * ratio))
-            g_val = int(speaker2_rgb[1] * (0.5 + 0.5 * ratio))
-            b_val = int(speaker2_rgb[2] * (0.5 + 0.5 * ratio))
+            r_val = int(right_rgb[0] * (0.5 + 0.5 * ratio))
+            g_val = int(right_rgb[1] * (0.5 + 0.5 * ratio))
+            b_val = int(right_rgb[2] * (0.5 + 0.5 * ratio))
             
             # Add wave pattern effect inside
             if r % 10 < 5:
@@ -362,7 +428,7 @@ def create_audio_visualization(
                 b_val = min(255, int(b_val * 1.2))
             
             # Darken the inactive speaker's circle
-            if active_speaker != "B":
+            if active_position != "right":
                 r_val = int(r_val * 0.7)
                 g_val = int(g_val * 0.7)
                 b_val = int(b_val * 0.7)
@@ -373,26 +439,22 @@ def create_audio_visualization(
             # Draw concentric circles with decreasing radius
             cv2.circle(
                 frame,
-                (center_x_b, center_y),
+                (center_x_right, center_y),
                 r,
                 circle_color,
-                2 if r == volume_radius_b else -1  # Outline for outer circle, filled for inner
+                2 if r == right_radius else -1  # Outline for outer circle, filled for inner
             )
         
         # Add a pulse effect outer ring only for active speaker
-        if active_speaker == "A":
-            # Highlight the left side (Speaker A)
-            # Convert RGB to BGR for OpenCV
-            active_color_bgr = speaker1_rgb[::-1]
-            
-            # Create brighter version for active speaker
-            frame[:, :half_width] = active_color_bgr
+        if active_position == "left":
+            # Highlight the left side
+            frame[:, :half_width] = left_rgb[::-1]  # Convert RGB to BGR
             
             # Add a pulse effect outer ring
-            pulse_size = int(volume_radius_a * (1.0 + 0.1 * np.sin(t * 8)))
+            pulse_size = int(left_radius * (1.0 + 0.1 * np.sin(t * 8)))
             cv2.circle(
                 frame,
-                (center_x_a, center_y),
+                (center_x_left, center_y),
                 pulse_size,
                 (255, 255, 255),
                 2
@@ -407,19 +469,15 @@ def create_audio_visualization(
                 3  # Border thickness
             )
             
-        elif active_speaker == "B":
-            # Highlight the right side (Speaker B)
-            # Convert RGB to BGR for OpenCV
-            active_color_bgr = speaker2_rgb[::-1]
-            
-            # Create brighter version for active speaker
-            frame[:, half_width:] = active_color_bgr
+        elif active_position == "right":
+            # Highlight the right side
+            frame[:, half_width:] = right_rgb[::-1]  # Convert RGB to BGR
             
             # Add a pulse effect outer ring
-            pulse_size = int(volume_radius_b * (1.0 + 0.1 * np.sin(t * 8)))
+            pulse_size = int(right_radius * (1.0 + 0.1 * np.sin(t * 8)))
             cv2.circle(
                 frame,
-                (center_x_b, center_y),
+                (center_x_right, center_y),
                 pulse_size,
                 (255, 255, 255),
                 2
@@ -440,8 +498,8 @@ def create_audio_visualization(
         
         # Add speaker labels with anti-aliased text - moved down closer to middle
         name_y_position = center_y - 300  # Increased distance from center (was -180)
-        draw.text((half_width // 2 - 80, name_y_position), "Ben", fill=(255, 255, 255), font=title_font)
-        draw.text((half_width + half_width // 2 - 80, name_y_position), "Taylor", fill=(255, 255, 255), font=title_font)
+        draw.text((half_width // 2 - 80, name_y_position), left_speaker["name"], fill=(255, 255, 255), font=title_font)
+        draw.text((half_width + half_width // 2 - 80, name_y_position), right_speaker["name"], fill=(255, 255, 255), font=title_font)
         
         # Add current text at the bottom of the frame with modern styling
         if current_text:
@@ -531,7 +589,10 @@ def main():
     # Generate output path based on input file
     audio_path = Path(args.audio_file)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    output_path = str(audio_path.with_suffix(f'.viz_{timestamp}.mp4'))
+    output_suffix = f'.viz_{timestamp}'
+    if args.preview:
+        output_suffix += '_preview'
+    output_path = str(audio_path.with_suffix(f'{output_suffix}.mp4'))
     logger.info(f"Output will be saved to: {output_path}")
     
     try:
@@ -549,11 +610,13 @@ def main():
         if len(segments) > 5:
             logger.info(f"  ... and {len(segments) - 5} more segments")
         
-        # Step 2: Create audio visualization
+        # Step 2: Create audio visualization with optional speaker swap
         create_audio_visualization(
             segments,
             args.audio_file,
-            output_path
+            output_path,
+            swap_speaker=args.swap_speaker,
+            preview=args.preview
         )
         
         logger.info(f"Speaker visualization video created successfully: {output_path}")
